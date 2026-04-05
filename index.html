@@ -274,7 +274,7 @@
                 const rate = parseInt(speedInput.value);
                 const rateStr = (rate >= 0 ? '+' : '') + rate + '%';
 
-                const maxLength = 4000;
+                const maxLength = 3000;
                 const chunks = splitTextIntoChunks(text, maxLength);
                 
                 let audioBlob = null;
@@ -282,9 +282,13 @@
                 for (let i = 0; i < chunks.length; i++) {
                     updateProgress(Math.round((i / chunks.length) * 50), `Parça ${i + 1}/${chunks.length} oluşturuluyor...`);
 
-                    const response = await fetch(`${API_BASE}/tts`, {
+                    // Use CORS proxy
+                    const response = await fetch('https://corsproxy.io/?' + encodeURIComponent(`${API_BASE}/tts`), {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Origin': window.location.origin
+                        },
                         body: JSON.stringify({
                             text: chunks[i],
                             voice: voice,
@@ -305,7 +309,7 @@
 
                     updateProgress(50 + Math.round((i / chunks.length) * 40), 'MP3 indiriliyor...');
 
-                    const audioResponse = await fetch(`${API_BASE}/audio/${fileId}`);
+                    const audioResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent(`${API_BASE}/audio/${fileId}`));
                     const chunkBlob = await audioResponse.blob();
 
                     if (i === 0) {
