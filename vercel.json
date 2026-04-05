@@ -1,9 +1,5 @@
 {
-  "builds": [
-    { "src": "/index.html", "use": "@vercel/static" },
-    { "src": "/api/tts.js", "use": "@vercel/node" }
-  ],
-  "routes": [
-    { "src": "/api/tts", "dest": "/api/tts.js" }
+  "rewrites": [
+    { "source": "/api/tts", "destination": "/api/tts.js" }
   ]
 }
