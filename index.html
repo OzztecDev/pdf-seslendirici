@@ -90,6 +90,7 @@
         .status.info { background: #e3f2fd; color: #1565c0; }
         .status.success { background: #e8f5e9; color: #2e7d32; }
         .status.error { background: #ffebee; color: #c62828; }
+        .status.warning { background: #fff3e0; color: #e65100; }
         .audio-player { display: none; margin-top: 20px; }
         .audio-player.active { display: block; }
         audio { width: 100%; border-radius: 10px; }
@@ -109,18 +110,12 @@
         
         <div class="controls" id="controls">
             <div class="control-group">
-                <label for="voiceSelect">Ses Seçimi</label>
-                <select id="voiceSelect">
-                    <option value="tr-TR-AhmetNeural">Ahmet (Türkçe)</option>
-                    <option value="tr-TR-EmelNeural">Emel (Türkçe)</option>
-                    <option value="en-US-AriaNeural">Aria (İngilizce)</option>
-                    <option value="en-US-GuyNeural">Guy (İngilizce)</option>
-                    <option value="en-GB-SoniaNeural">Sonia (İngilizce)</option>
-                </select>
+                <label for="voiceSelect">Ses Seçimi <button id="refreshVoices" style="font-size:10px;padding:2px 6px;">↻</button></label>
+                <select id="voiceSelect"></select>
             </div>
             <div class="control-group">
-                <label for="speedInput">Okuma Hızı: <span id="speedValue">0</span></label>
-                <input type="range" id="speedInput" min="-50" max="50" step="10" value="0">
+                <label for="speedInput">Okuma Hızı: <span id="speedValue">1</span></label>
+                <input type="range" id="speedInput" min="0.5" max="2" step="0.1" value="1">
             </div>
         </div>
         
@@ -152,7 +147,11 @@
 
     <script>
         let extractedText = '';
-        let currentAudioBlob = null;
+        let audioChunks = [];
+        let mediaRecorder = null;
+        let speechSynthesis = window.speechSynthesis;
+        let currentUtterance = null;
+        let isRecording = false;
 
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -160,6 +159,7 @@
         const controls = document.getElementById('controls');
         const btnGroup = document.getElementById('btnGroup');
         const voiceSelect = document.getElementById('voiceSelect');
+        const refreshVoices = document.getElementById('refreshVoices');
         const speedInput = document.getElementById('speedInput');
         const speedValue = document.getElementById('speedValue');
         const playBtn = document.getElementById('playBtn');
@@ -196,7 +196,47 @@
             }
         });
         fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
-        speedInput.addEventListener('input', () => { speedValue.textContent = parseInt(speedInput.value) > 0 ? `+${speedInput.value}` : speedInput.value; });
+        speedInput.addEventListener('input', () => { speedValue.textContent = speedInput.value; });
+        refreshVoices.addEventListener('click', loadVoices);
+
+        function loadVoices() {
+            const voices = speechSynthesis.getVoices();
+            voiceSelect.innerHTML = '';
+            
+            if (voices.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = 'default';
+                opt.textContent = 'Varsayılan Ses';
+                voiceSelect.appendChild(opt);
+                return;
+            }
+            
+            const turkish = voices.filter(v => v.lang.includes('tr'));
+            const english = voices.filter(v => v.lang.includes('en'));
+            const other = voices.filter(v => !v.lang.includes('tr') && !v.lang.includes('en'));
+            
+            if (turkish.length) {
+                const g = document.createElement('optgroup');
+                g.label = 'Türkçe';
+                turkish.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.name; g.appendChild(o); });
+                voiceSelect.appendChild(g);
+            }
+            if (english.length) {
+                const g = document.createElement('optgroup');
+                g.label = 'English';
+                english.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.name; g.appendChild(o); });
+                voiceSelect.appendChild(g);
+            }
+            if (other.length) {
+                const g = document.createElement('optgroup');
+                g.label = 'Diğer';
+                other.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.name; g.appendChild(o); });
+                voiceSelect.appendChild(g);
+            }
+        }
+
+        speechSynthesis.onvoiceschanged = loadVoices;
+        setTimeout(loadVoices, 500);
 
         async function handleFile(file) {
             showStatus('PDF okunuyor...', 'info');
@@ -220,18 +260,18 @@
                 controls.classList.add('active');
                 btnGroup.classList.add('active');
                 downloadBtn.disabled = true;
-                showStatus(`PDF başarıyla yüklendi! ${extractedText.length} karakter metin çıkarıldı.`, 'success');
+                showStatus(`PDF başarıyla yüklendi! ${extractedText.length} karakter.`, 'success');
             } catch (error) {
-                showStatus('PDF okunurken hata: ' + error.message, 'error');
+                showStatus('Hata: ' + error.message, 'error');
             }
         }
 
-        async function synthesizeSpeech() {
+        async function speakText() {
             const text = textContent.value || extractedText;
             if (!text) { showStatus('Önce PDF yükleyin', 'error'); return; }
 
-            const maxLength = 8000;
-            const chunks = text.length > maxLength ? splitTextIntoChunks(text, maxLength) : [text];
+            speechSynthesis.cancel();
+            audioChunks = [];
             
             playBtn.disabled = true;
             downloadBtn.disabled = true;
@@ -239,78 +279,92 @@
             audioPlayer.classList.remove('active');
 
             try {
-                const audioChunks = [];
-                const voice = voiceSelect.value;
-                const rate = parseInt(speedInput.value);
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(audioChunks, { type: 'audio/mp3' });
+                    const url = URL.createObjectURL(blob);
+                    audioElement.src = url;
+                    audioPlayer.classList.add('active');
+                    downloadBtn.disabled = false;
+                    stream.getTracks().forEach(t => t.stop());
+                };
 
-                for (let i = 0; i < chunks.length; i++) {
-                    updateProgress(Math.round((i / chunks.length) * 90), `Parça ${i + 1}/${chunks.length} oluşturuluyor...`);
-                    const audioData = await callEdgeTTS(chunks[i], voice, rate);
-                    audioChunks.push(audioData);
+                mediaRecorder.start();
+                isRecording = true;
+
+                const chunks = splitTextIntoChunks(text, 5000);
+                let currentChunk = 0;
+
+                function speakNext() {
+                    if (currentChunk >= chunks.length) {
+                        if (mediaRecorder && mediaRecorder.state === 'recording') {
+                            setTimeout(() => mediaRecorder.stop(), 500);
+                        }
+                        updateProgress(100, 'Tamamlandı!');
+                        showStatus('Seslendirme hazır!', 'success');
+                        playBtn.disabled = false;
+                        setTimeout(() => progressContainer.classList.remove('active'), 2000);
+                        return;
+                    }
+
+                    const utterance = new SpeechSynthesisUtterance(chunks[currentChunk]);
+                    const voices = speechSynthesis.getVoices();
+                    const selectedVoice = voices.find(v => v.name === voiceSelect.value);
+                    if (selectedVoice) utterance.voice = selectedVoice;
+                    utterance.rate = parseFloat(speedInput.value);
+
+                    utterance.onend = () => {
+                        updateProgress(Math.round((currentChunk / chunks.length) * 100), `Parça ${currentChunk + 1}/${chunks.length}`);
+                        currentChunk++;
+                        speakNext();
+                    };
+                    
+                    utterance.onerror = (e) => console.error(e);
+                    currentUtterance = utterance;
+                    speechSynthesis.speak(utterance);
                 }
 
-                updateProgress(95, 'Birleştiriliyor...');
-                
-                const combinedBlob = new Blob(audioChunks, { type: 'audio/mp3' });
-                currentAudioBlob = combinedBlob;
-                
-                const url = URL.createObjectURL(combinedBlob);
-                audioElement.src = url;
-                audioPlayer.classList.add('active');
-                downloadBtn.disabled = false;
-                
-                updateProgress(100, 'Tamamlandı!');
-                showStatus('Seslendirme hazır!', 'success');
-                audioElement.play();
+                speakNext();
+
             } catch (error) {
                 console.error(error);
-                showStatus('Hata: ' + error.message, 'error');
-            } finally {
+                showStatus('Mikrofon hatası: ' + error.message + '. Mikrofon izni verin.', 'error');
                 playBtn.disabled = false;
-                setTimeout(() => { progressContainer.classList.remove('active'); }, 2000);
+                progressContainer.classList.remove('active');
             }
-        }
-
-        async function callEdgeTTS(text, voice, rate) {
-            const API_URL = '/api/tts';
-            
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, voice, rate })
-            });
-            
-            if (!response.ok) throw new Error('TTS API hatası: ' + response.status);
-            return response.blob();
         }
 
         function splitTextIntoChunks(text, maxLength) {
             const chunks = [];
             const sentences = text.split(/([.!?]+)/);
-            let currentChunk = '';
-            for (let i = 0; i < sentences.length; i++) {
-                if ((currentChunk + sentences[i]).length > maxLength && currentChunk.length > 0) {
-                    chunks.push(currentChunk.trim());
-                    currentChunk = '';
+            let current = '';
+            for (const s of sentences) {
+                if ((current + s).length > maxLength && current.length > 0) {
+                    chunks.push(current.trim());
+                    current = '';
                 }
-                currentChunk += sentences[i];
+                current += s;
             }
-            if (currentChunk.trim()) chunks.push(currentChunk.trim());
-            return chunks.length > 0 ? chunks : [text];
+            if (current.trim()) chunks.push(current.trim());
+            return chunks.length ? chunks : [text];
         }
 
-        async function downloadAudio() {
-            if (!currentAudioBlob) { showStatus('Önce seslendirme yapın', 'error'); return; }
-            const url = URL.createObjectURL(currentAudioBlob);
+        function downloadAudio() {
+            if (!audioElement.src) { showStatus('Önce seslendirme yapın', 'error'); return; }
             const a = document.createElement('a');
-            a.href = url;
+            a.href = audioElement.src;
             a.download = 'seslendirme.mp3';
             a.click();
-            URL.revokeObjectURL(url);
             showStatus('MP3 indirildi!', 'success');
         }
 
-        playBtn.addEventListener('click', synthesizeSpeech);
+        playBtn.addEventListener('click', speakText);
         downloadBtn.addEventListener('click', downloadAudio);
     </script>
 </body>
