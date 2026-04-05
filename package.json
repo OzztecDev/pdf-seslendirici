@@ -1,11 +1,5 @@
 {
   "name": "pdf-seslendirici",
   "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "start": "npx serve ."
-  },
-  "dependencies": {
-    "node-edge-tts": "^2.10.0"
-  }
+  "private": true
 }
