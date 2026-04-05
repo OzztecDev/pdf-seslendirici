@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Seslendirici</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { text-align: center; color: #333; margin-bottom: 30px; }
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover { background: #f0f0ff; border-color: #764ba2; }
+        .upload-area.dragover { background: #e0e0ff; border-color: #764ba2; }
+        .upload-icon { font-size: 48px; margin-bottom: 10px; }
+        input[type="file"] { display: none; }
+        .controls { display: none; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+        .controls.active { display: flex; }
+        .control-group { flex: 1; min-width: 200px; }
+        label { display: block; margin-bottom: 5px; color: #555; font-weight: 500; }
+        select, input[type="range"] {
+            width: 100%; padding: 10px;
+            border: 2px solid #ddd; border-radius: 8px; font-size: 14px;
+        }
+        select:focus { outline: none; border-color: #667eea; }
+        .btn-group { display: none; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 20px 0; }
+        .btn-group.active { display: flex; }
+        .btn {
+            padding: 15px 30px; border: none; border-radius: 10px;
+            font-size: 16px; font-weight: 600; cursor: pointer;
+            transition: all 0.3s; display: flex; align-items: center; gap: 8px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary:hover { transform: translateY(-2px); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+        .btn-success:hover { transform: translateY(-2px); }
+        .btn-success:disabled { opacity: 0.5; cursor: not-allowed; }
+        .progress-container { display: none; margin: 20px 0; }
+        .progress-container.active { display: block; }
+        .progress-bar { height: 30px; background: #f0f0f0; border-radius: 15px; overflow: hidden; }
+        .progress-fill {
+            height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s; display: flex; align-items: center;
+            justify-content: center; color: white; font-weight: 600;
+        }
+        .progress-text { text-align: center; margin-top: 10px; color: #666; }
+        .text-preview { display: none; margin-top: 20px; }
+        .text-preview.active { display: block; }
+        .text-preview h3 { color: #333; margin-bottom: 10px; }
+        .text-content {
+            min-height: 200px; height: 200px; padding: 15px;
+            background: #f9f9f9; border-radius: 10px; border: 2px solid #eee;
+            line-height: 1.6; font-family: inherit; font-size: 14px;
+            resize: vertical; width: 100%; overflow-y: auto;
+        }
+        .text-content:focus { outline: none; border-color: #667eea; }
+        .status { text-align: center; padding: 15px; border-radius: 10px; margin: 10px 0; display: none; }
+        .status.active { display: block; }
+        .status.info { background: #e3f2fd; color: #1565c0; }
+        .status.success { background: #e8f5e9; color: #2e7d32; }
+        .status.error { background: #ffebee; color: #c62828; }
+        .audio-player { display: none; margin-top: 20px; }
+        .audio-player.active { display: block; }
+        audio { width: 100%; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📖 PDF Seslendirici</h1>
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📄</div>
+            <p>PDF dosyası yüklemek için tıklayın veya sürükleyin</p>
+            <input type="file" id="fileInput" accept=".pdf">
+        </div>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="controls" id="controls">
+            <div class="control-group">
+                <label for="voiceSelect">Ses Seçimi</label>
+                <select id="voiceSelect">
+                    <option value="tr-TR-AhmetNeural">Ahmet (Türkçe)</option>
+                    <option value="tr-TR-EmelNeural">Emel (Türkçe)</option>
+                    <option value="en-US-AriaNeural">Aria (İngilizce)</option>
+                    <option value="en-US-GuyNeural">Guy (İngilizce)</option>
+                    <option value="en-GB-SoniaNeural">Sonia (İngilizce)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="speedInput">Okuma Hızı: <span id="speedValue">0</span></label>
+                <input type="range" id="speedInput" min="-50" max="50" step="10" value="0">
+            </div>
+        </div>
+        
+        <div class="btn-group" id="btnGroup">
+            <button class="btn btn-primary" id="playBtn">
+                <span>🔊</span> Seslendir
+            </button>
+            <button class="btn btn-success" id="downloadBtn" disabled>
+                <span>⬇</span> MP3 İndir
+            </button>
+        </div>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
+            </div>
+            <p class="progress-text" id="progressText">Seslendirme oluşturuluyor...</p>
+        </div>
+        
+        <div class="audio-player" id="audioPlayer">
+            <audio id="audioElement" controls></audio>
+        </div>
+        
+        <div class="text-preview" id="textPreview">
+            <h3>Çıkarılan Metin (Düzenlenebilir):</h3>
+            <textarea class="text-content" id="textContent" placeholder="PDF'den metin buraya gelecek..."></textarea>
+        </div>
+    </div>
+
+    <script>
+        let extractedText = '';
+        let currentAudioBlob = null;
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const status = document.getElementById('status');
+        const controls = document.getElementById('controls');
+        const btnGroup = document.getElementById('btnGroup');
+        const voiceSelect = document.getElementById('voiceSelect');
+        const speedInput = document.getElementById('speedInput');
+        const speedValue = document.getElementById('speedValue');
+        const playBtn = document.getElementById('playBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const audioElement = document.getElementById('audioElement');
+        const textPreview = document.getElementById('textPreview');
+        const textContent = document.getElementById('textContent');
+
+        function showStatus(message, type) {
+            status.textContent = message;
+            status.className = `status active ${type}`;
+        }
+
+        function updateProgress(percent, text) {
+            progressFill.style.width = `${percent}%`;
+            progressFill.textContent = `${percent}%`;
+            progressText.textContent = text;
+        }
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => { uploadArea.classList.remove('dragover'); });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0 && e.dataTransfer.files[0].type === 'application/pdf') {
+                handleFile(e.dataTransfer.files[0]);
+            } else {
+                showStatus('Lütfen PDF dosyası yükleyin', 'error');
+            }
+        });
+        fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
+        speedInput.addEventListener('input', () => { speedValue.textContent = parseInt(speedInput.value) > 0 ? `+${speedInput.value}` : speedInput.value; });
+
+        async function handleFile(file) {
+            showStatus('PDF okunuyor...', 'info');
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                let fullText = '';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    fullText += textContent.items.map(item => item.str).join(' ') + '\n\n';
+                    showStatus(`Sayfa ${i}/${pdf.numPages} okunuyor...`, 'info');
+                }
+                extractedText = fullText.trim();
+                if (extractedText.length === 0) {
+                    showStatus('PDF\'te metin bulunamadı.', 'error');
+                    return;
+                }
+                textContent.value = extractedText;
+                textPreview.classList.add('active');
+                controls.classList.add('active');
+                btnGroup.classList.add('active');
+                downloadBtn.disabled = true;
+                showStatus(`PDF başarıyla yüklendi! ${extractedText.length} karakter metin çıkarıldı.`, 'success');
+            } catch (error) {
+                showStatus('PDF okunurken hata: ' + error.message, 'error');
+            }
+        }
+
+        async function synthesizeSpeech() {
+            const text = textContent.value || extractedText;
+            if (!text) { showStatus('Önce PDF yükleyin', 'error'); return; }
+
+            const maxLength = 8000;
+            const chunks = text.length > maxLength ? splitTextIntoChunks(text, maxLength) : [text];
+            
+            playBtn.disabled = true;
+            downloadBtn.disabled = true;
+            progressContainer.classList.add('active');
+            audioPlayer.classList.remove('active');
+
+            try {
+                const audioChunks = [];
+                const voice = voiceSelect.value;
+                const rate = parseInt(speedInput.value);
+
+                for (let i = 0; i < chunks.length; i++) {
+                    updateProgress(Math.round((i / chunks.length) * 90), `Parça ${i + 1}/${chunks.length} oluşturuluyor...`);
+                    const audioData = await callEdgeTTS(chunks[i], voice, rate);
+                    audioChunks.push(audioData);
+                }
+
+                updateProgress(95, 'Birleştiriliyor...');
+                
+                const combinedBlob = new Blob(audioChunks, { type: 'audio/mp3' });
+                currentAudioBlob = combinedBlob;
+                
+                const url = URL.createObjectURL(combinedBlob);
+                audioElement.src = url;
+                audioPlayer.classList.add('active');
+                downloadBtn.disabled = false;
+                
+                updateProgress(100, 'Tamamlandı!');
+                showStatus('Seslendirme hazır!', 'success');
+                audioElement.play();
+            } catch (error) {
+                console.error(error);
+                showStatus('Hata: ' + error.message, 'error');
+            } finally {
+                playBtn.disabled = false;
+                setTimeout(() => { progressContainer.classList.remove('active'); }, 2000);
+            }
+        }
+
+        async function callEdgeTTS(text, voice, rate) {
+            const endpoint = 'https://speech.platform.bing.com/synthesize';
+            const headers = {
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mp3',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            };
+            
+            const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
+                <voice name='${voice}'>
+                    <prosody rate='${rate >= 0 ? '+' : ''}${rate}%'>${escapeXml(text)}</prosody>
+                </voice>
+            </speak>`;
+            
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { ...headers, 'Content-Length': ssml.length },
+                body: ssml
+            });
+            
+            if (!response.ok) throw new Error('TTS API hatası: ' + response.status);
+            return response.blob();
+        }
+
+        function escapeXml(text) {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function splitTextIntoChunks(text, maxLength) {
+            const chunks = [];
+            const sentences = text.split(/([.!?]+)/);
+            let currentChunk = '';
+            for (let i = 0; i < sentences.length; i++) {
+                if ((currentChunk + sentences[i]).length > maxLength && currentChunk.length > 0) {
+                    chunks.push(currentChunk.trim());
+                    currentChunk = '';
+                }
+                currentChunk += sentences[i];
+            }
+            if (currentChunk.trim()) chunks.push(currentChunk.trim());
+            return chunks.length > 0 ? chunks : [text];
+        }
+
+        async function downloadAudio() {
+            if (!currentAudioBlob) { showStatus('Önce seslendirme yapın', 'error'); return; }
+            const url = URL.createObjectURL(currentAudioBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'seslendirme.mp3';
+            a.click();
+            URL.revokeObjectURL(url);
+            showStatus('MP3 indirildi!', 'success');
+        }
+
+        playBtn.addEventListener('click', synthesizeSpeech);
+        downloadBtn.addEventListener('click', downloadAudio);
+    </script>
+</body>
+</html>
