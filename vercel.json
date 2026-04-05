@@ -1,7 +1,10 @@
 {
-  "functions": {
-    "api/tts.js": {
-      "runtime": "nodejs18.x"
-    }
-  }
+  "version": 2,
+  "builds": [
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "api/tts.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/tts", "dest": "/api/tts.js" }
+  ]
 }
