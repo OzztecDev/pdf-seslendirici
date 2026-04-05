@@ -90,10 +90,10 @@
         .status.info { background: #e3f2fd; color: #1565c0; }
         .status.success { background: #e8f5e9; color: #2e7d32; }
         .status.error { background: #ffebee; color: #c62828; }
-        .status.warning { background: #fff3e0; color: #e65100; }
         .audio-player { display: none; margin-top: 20px; }
         .audio-player.active { display: block; }
         audio { width: 100%; border-radius: 10px; }
+        .loading-voices { font-size: 12px; color: #666; }
     </style>
 </head>
 <body>
@@ -110,8 +110,11 @@
         
         <div class="controls" id="controls">
             <div class="control-group">
-                <label for="voiceSelect">Ses Seçimi <button id="refreshVoices" style="font-size:10px;padding:2px 6px;">↻</button></label>
-                <select id="voiceSelect"></select>
+                <label for="voiceSelect">Ses Seçimi <button id="refreshVoices" style="font-size:10px;padding:2px 6px;margin-left:5px;">🔄</button></label>
+                <select id="voiceSelect">
+                    <option value="">Sesler yükleniyor...</option>
+                </select>
+                <span class="loading-voices" id="voiceLoading">Sesler yükleniyor, lütfen bekleyin...</span>
             </div>
             <div class="control-group">
                 <label for="speedInput">Okuma Hızı: <span id="speedValue">1</span></label>
@@ -152,6 +155,7 @@
         let speechSynthesis = window.speechSynthesis;
         let currentUtterance = null;
         let isRecording = false;
+        let voicesLoaded = false;
 
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -159,6 +163,7 @@
         const controls = document.getElementById('controls');
         const btnGroup = document.getElementById('btnGroup');
         const voiceSelect = document.getElementById('voiceSelect');
+        const voiceLoading = document.getElementById('voiceLoading');
         const refreshVoices = document.getElementById('refreshVoices');
         const speedInput = document.getElementById('speedInput');
         const speedValue = document.getElementById('speedValue');
@@ -197,19 +202,22 @@
         });
         fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
         speedInput.addEventListener('input', () => { speedValue.textContent = speedInput.value; });
-        refreshVoices.addEventListener('click', loadVoices);
+        refreshVoices.addEventListener('click', () => loadVoices(true));
 
-        function loadVoices() {
+        function loadVoices(manual = false) {
+            voiceLoading.style.display = 'block';
+            
             const voices = speechSynthesis.getVoices();
-            voiceSelect.innerHTML = '';
             
             if (voices.length === 0) {
-                const opt = document.createElement('option');
-                opt.value = 'default';
-                opt.textContent = 'Varsayılan Ses';
-                voiceSelect.appendChild(opt);
+                if (!manual) {
+                    setTimeout(() => loadVoices(false), 1000);
+                }
                 return;
             }
+            
+            voiceLoading.style.display = 'none';
+            voiceSelect.innerHTML = '';
             
             const turkish = voices.filter(v => v.lang.includes('tr'));
             const english = voices.filter(v => v.lang.includes('en'));
@@ -218,25 +226,45 @@
             if (turkish.length) {
                 const g = document.createElement('optgroup');
                 g.label = 'Türkçe';
-                turkish.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.name; g.appendChild(o); });
+                turkish.forEach(v => { 
+                    const o = document.createElement('option'); 
+                    o.value = v.name; 
+                    o.textContent = v.name + ' (' + v.lang + ')'; 
+                    g.appendChild(o); 
+                });
                 voiceSelect.appendChild(g);
             }
+            
             if (english.length) {
                 const g = document.createElement('optgroup');
                 g.label = 'English';
-                english.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.name; g.appendChild(o); });
+                english.forEach(v => { 
+                    const o = document.createElement('option'); 
+                    o.value = v.name; 
+                    o.textContent = v.name + ' (' + v.lang + ')'; 
+                    g.appendChild(o); 
+                });
                 voiceSelect.appendChild(g);
             }
+            
             if (other.length) {
                 const g = document.createElement('optgroup');
-                g.label = 'Diğer';
-                other.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.name; g.appendChild(o); });
+                g.label = 'Diğer Diller';
+                other.slice(0, 20).forEach(v => { 
+                    const o = document.createElement('option'); 
+                    o.value = v.name; 
+                    o.textContent = v.name + ' (' + v.lang + ')'; 
+                    g.appendChild(o); 
+                });
                 voiceSelect.appendChild(g);
             }
+            
+            voicesLoaded = true;
         }
 
-        speechSynthesis.onvoiceschanged = loadVoices;
-        setTimeout(loadVoices, 500);
+        speechSynthesis.onvoiceschanged = () => loadVoices();
+        setTimeout(() => loadVoices(), 500);
+        setTimeout(() => loadVoices(), 1500);
 
         async function handleFile(file) {
             showStatus('PDF okunuyor...', 'info');
@@ -244,17 +272,35 @@
                 const arrayBuffer = await file.arrayBuffer();
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 let fullText = '';
+                
                 for (let i = 1; i <= pdf.numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
-                    fullText += textContent.items.map(item => item.str).join(' ') + '\n\n';
+                    const items = textContent.items;
+                    
+                    let pageText = '';
+                    let lastY = -1;
+                    
+                    for (let j = 0; j < items.length; j++) {
+                        const item = items[j];
+                        if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
+                            pageText += '\n';
+                        }
+                        pageText += item.str;
+                        lastY = item.transform[5];
+                    }
+                    
+                    fullText += pageText + '\n\n';
                     showStatus(`Sayfa ${i}/${pdf.numPages} okunuyor...`, 'info');
                 }
-                extractedText = fullText.trim();
+                
+                extractedText = fullText.trim().replace(/\s+/g, ' ');
+                
                 if (extractedText.length === 0) {
-                    showStatus('PDF\'te metin bulunamadı.', 'error');
+                    showStatus('PDF\'te metin bulunamadı. Bu PDF görüntü tabanlı olabilir.', 'error');
                     return;
                 }
+                
                 textContent.value = extractedText;
                 textPreview.classList.add('active');
                 controls.classList.add('active');
@@ -262,13 +308,22 @@
                 downloadBtn.disabled = true;
                 showStatus(`PDF başarıyla yüklendi! ${extractedText.length} karakter.`, 'success');
             } catch (error) {
+                console.error(error);
                 showStatus('Hata: ' + error.message, 'error');
             }
         }
 
-        async function speakText() {
+        function speakText() {
             const text = textContent.value || extractedText;
-            if (!text) { showStatus('Önce PDF yükleyin', 'error'); return; }
+            if (!text || text.length === 0) {
+                showStatus('Önce PDF yükleyin', 'error');
+                return;
+            }
+
+            if (!voicesLoaded) {
+                showStatus('Sesler henüz yüklenmedi. Lütfen bekleyin veya "🔄" butonuna tıklayın.', 'error');
+                return;
+            }
 
             speechSynthesis.cancel();
             audioChunks = [];
@@ -278,72 +333,84 @@
             progressContainer.classList.add('active');
             audioPlayer.classList.remove('active');
 
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) audioChunks.push(e.data);
-                };
-                
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(audioChunks, { type: 'audio/mp3' });
-                    const url = URL.createObjectURL(blob);
-                    audioElement.src = url;
-                    audioPlayer.classList.add('active');
-                    downloadBtn.disabled = false;
-                    stream.getTracks().forEach(t => t.stop());
-                };
-
-                mediaRecorder.start();
-                isRecording = true;
-
-                const chunks = splitTextIntoChunks(text, 5000);
-                let currentChunk = 0;
-
-                function speakNext() {
-                    if (currentChunk >= chunks.length) {
-                        if (mediaRecorder && mediaRecorder.state === 'recording') {
-                            setTimeout(() => mediaRecorder.stop(), 500);
-                        }
-                        updateProgress(100, 'Tamamlandı!');
-                        showStatus('Seslendirme hazır!', 'success');
-                        playBtn.disabled = false;
-                        setTimeout(() => progressContainer.classList.remove('active'), 2000);
-                        return;
-                    }
-
-                    const utterance = new SpeechSynthesisUtterance(chunks[currentChunk]);
-                    const voices = speechSynthesis.getVoices();
-                    const selectedVoice = voices.find(v => v.name === voiceSelect.value);
-                    if (selectedVoice) utterance.voice = selectedVoice;
-                    utterance.rate = parseFloat(speedInput.value);
-
-                    utterance.onend = () => {
-                        updateProgress(Math.round((currentChunk / chunks.length) * 100), `Parça ${currentChunk + 1}/${chunks.length}`);
-                        currentChunk++;
-                        speakNext();
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) audioChunks.push(e.data);
                     };
                     
-                    utterance.onerror = (e) => console.error(e);
-                    currentUtterance = utterance;
-                    speechSynthesis.speak(utterance);
-                }
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(audioChunks, { type: 'audio/mp3' });
+                        const url = URL.createObjectURL(blob);
+                        audioElement.src = url;
+                        audioPlayer.classList.add('active');
+                        downloadBtn.disabled = false;
+                        stream.getTracks().forEach(t => t.stop());
+                    };
 
-                speakNext();
+                    mediaRecorder.start();
+                    isRecording = true;
 
-            } catch (error) {
-                console.error(error);
-                showStatus('Mikrofon hatası: ' + error.message + '. Mikrofon izni verin.', 'error');
-                playBtn.disabled = false;
-                progressContainer.classList.remove('active');
-            }
+                    const chunks = splitTextIntoChunks(text, 3000);
+                    let currentChunk = 0;
+
+                    function speakNext() {
+                        if (currentChunk >= chunks.length) {
+                            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                                setTimeout(() => mediaRecorder.stop(), 1000);
+                            }
+                            updateProgress(100, 'Tamamlandı!');
+                            showStatus('Seslendirme hazır! MP3 indir butonuna basarak kaydedebilirsiniz.', 'success');
+                            playBtn.disabled = false;
+                            setTimeout(() => progressContainer.classList.remove('active'), 3000);
+                            return;
+                        }
+
+                        const utterance = new SpeechSynthesisUtterance(chunks[currentChunk]);
+                        const voices = speechSynthesis.getVoices();
+                        const selectedVoice = voices.find(v => v.name === voiceSelect.value);
+                        if (selectedVoice) {
+                            utterance.voice = selectedVoice;
+                        }
+                        utterance.rate = parseFloat(speedInput.value);
+                        utterance.pitch = 1;
+
+                        utterance.onend = () => {
+                            currentChunk++;
+                            const percent = Math.round((currentChunk / chunks.length) * 100);
+                            updateProgress(percent, `Parça ${currentChunk + 1}/${chunks.length} okunuyor...`);
+                            speakNext();
+                        };
+                        
+                        utterance.onerror = (e) => {
+                            console.error('Speech error:', e);
+                            currentChunk++;
+                            speakNext();
+                        };
+
+                        currentUtterance = utterance;
+                        speechSynthesis.speak(utterance);
+                    }
+
+                    speakNext();
+                })
+                .catch(error => {
+                    console.error(error);
+                    showStatus('Mikrofon izni gerekli! Tarayıcıda mikrofon izni verin.', 'error');
+                    playBtn.disabled = false;
+                    progressContainer.classList.remove('active');
+                });
         }
 
         function splitTextIntoChunks(text, maxLength) {
+            if (text.length <= maxLength) return [text];
+            
             const chunks = [];
-            const sentences = text.split(/([.!?]+)/);
+            const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
             let current = '';
+            
             for (const s of sentences) {
                 if ((current + s).length > maxLength && current.length > 0) {
                     chunks.push(current.trim());
@@ -352,11 +419,15 @@
                 current += s;
             }
             if (current.trim()) chunks.push(current.trim());
-            return chunks.length ? chunks : [text];
+            
+            return chunks.length ? chunks : [text.substring(0, maxLength)];
         }
 
         function downloadAudio() {
-            if (!audioElement.src) { showStatus('Önce seslendirme yapın', 'error'); return; }
+            if (!audioElement.src) {
+                showStatus('Önce seslendirme yapın', 'error');
+                return;
+            }
             const a = document.createElement('a');
             a.href = audioElement.src;
             a.download = 'seslendirme.mp3';
