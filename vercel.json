@@ -1,8 +1,9 @@
 {
   "builds": [
-    { "src": "/index.html", "use": "@vercel/static" }
+    { "src": "/index.html", "use": "@vercel/static" },
+    { "src": "/api/tts.js", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/", "dest": "/index.html" }
+    { "src": "/api/tts", "dest": "/api/tts.js" }
   ]
 }

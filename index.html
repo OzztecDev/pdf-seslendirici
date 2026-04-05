@@ -161,7 +161,7 @@
     <script>
         let extractedText = '';
         let currentAudioUrl = '';
-        const API_BASE = 'https://freetts.org/api';
+        const API_BASE = '/api/tts';
 
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
@@ -274,60 +274,36 @@
                 const rate = parseInt(speedInput.value);
                 const rateStr = (rate >= 0 ? '+' : '') + rate + '%';
 
-                const maxLength = 3000;
-                const chunks = splitTextIntoChunks(text, maxLength);
-                
-                let audioBlob = null;
+                updateProgress(20, 'Seslendirme oluşturuluyor...');
 
-                for (let i = 0; i < chunks.length; i++) {
-                    updateProgress(Math.round((i / chunks.length) * 50), `Parça ${i + 1}/${chunks.length} oluşturuluyor...`);
+                const response = await fetch(API_BASE, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text.substring(0, 5000),
+                        voice: voice,
+                        rate: rateStr
+                    })
+                });
 
-                    // Use CORS proxy
-                    const response = await fetch('https://corsproxy.io/?' + encodeURIComponent(`${API_BASE}/tts`), {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'Origin': window.location.origin
-                        },
-                        body: JSON.stringify({
-                            text: chunks[i],
-                            voice: voice,
-                            rate: rateStr,
-                            pitch: '+0Hz'
-                        })
-                    });
-
-                    if (!response.ok) {
-                        if (response.status === 429) {
-                            throw new Error('Rate limit (20/dk) aşıldı. 1 dakika bekleyin.');
-                        }
-                        throw new Error('API hatası: ' + response.status);
+                if (!response.ok) {
+                    if (response.status === 429) {
+                        throw new Error('Rate limit (20/dk) aşıldı. 1 dakika bekleyin.');
                     }
-
-                    const data = await response.json();
-                    const fileId = data.file_id;
-
-                    updateProgress(50 + Math.round((i / chunks.length) * 40), 'MP3 indiriliyor...');
-
-                    const audioResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent(`${API_BASE}/audio/${fileId}`));
-                    const chunkBlob = await audioResponse.blob();
-
-                    if (i === 0) {
-                        audioBlob = chunkBlob;
-                    } else {
-                        const combined = await combineAudioBlobs(audioBlob, chunkBlob);
-                        audioBlob = combined;
-                    }
+                    throw new Error('API hatası: ' + response.status);
                 }
 
-                updateProgress(100, 'Tamamlandı!');
+                updateProgress(80, 'MP3 indiriliyor...');
+
+                const blob = await response.blob();
+                currentAudioUrl = URL.createObjectURL(blob);
                 
-                currentAudioUrl = URL.createObjectURL(audioBlob);
                 audioElement.src = currentAudioUrl;
                 audioPlayer.classList.add('active');
                 downloadBtn.disabled = false;
                 
-                showStatus('Seslendirme hazır! MP3 indir butonuna basarak kaydedebilirsiniz.', 'success');
+                updateProgress(100, 'Tamamlandı!');
+                showStatus('Seslendirme hazır!', 'success');
                 audioElement.play();
 
             } catch (error) {
@@ -337,15 +313,6 @@
                 playBtn.disabled = false;
                 setTimeout(() => progressContainer.classList.remove('active'), 3000);
             }
-        }
-
-        async function combineAudioBlobs(blob1, blob2) {
-            const array1 = await blob1.arrayBuffer();
-            const array2 = await blob2.arrayBuffer();
-            const combined = new Uint8Array(array1.byteLength + array2.byteLength);
-            combined.set(new Uint8Array(array1), 0);
-            combined.set(new Uint8Array(array2), array1.byteLength);
-            return new Blob([combined], { type: 'audio/mp3' });
         }
 
         function splitTextIntoChunks(text, maxLength) {

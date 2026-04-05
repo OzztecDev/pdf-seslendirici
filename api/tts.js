@@ -1,6 +1,4 @@
-const { EdgeTTS } = require('node-edge-tts');
-const fs = require('fs');
-const path = require('path');
+const https = require('https');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
@@ -16,30 +14,65 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { text, voice = 'tr-TR-AhmetNeural', rate = 0 } = req.body;
+    const { text, voice = 'tr-TR-AhmetNeural', rate = '+0%' } = req.body;
 
     if (!text) {
       return res.status(400).json({ error: 'Metin bulunamadı' });
     }
 
-    const outputFile = path.join('/tmp', `audio_${Date.now()}.mp3`);
-
-    const tts = new EdgeTTS({
+    const postData = JSON.stringify({
+      text: text,
       voice: voice,
-      rate: rate >= 0 ? `+${rate}%` : `${rate}%`,
-      outputFormat: 'audio-24khz-96kbitrate-mp3'
+      rate: rate,
+      pitch: '+0Hz'
     });
 
-    await tts.ttsPromise(text, outputFile);
+    const options = {
+      hostname: 'freetts.org',
+      path: '/api/tts',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
 
-    const audioBuffer = fs.readFileSync(outputFile);
-    fs.unlinkSync(outputFile);
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error('Invalid response'));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.write(postData);
+      req.end();
+    });
 
-    res.setHeader('Content-Type', 'audio/mp3');
+    if (!result.file_id) {
+      return res.status(500).json({ error: 'API error' });
+    }
+
+    const audioResult = await new Promise((resolve, reject) => {
+      https.get(`https://freetts.org/api/audio/${result.file_id}`, (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on('error', reject);
+      });
+    });
+
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', 'attachment; filename="seslendirme.mp3"');
-    res.send(audioBuffer);
+    res.send(audioResult);
+
   } catch (error) {
-    console.error('TTS Error:', error);
+    console.error(error);
     res.status(500).json({ error: error.message });
   }
 };
