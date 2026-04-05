@@ -5,7 +5,7 @@
   "scripts": {
     "start": "npx serve ."
   },
-  "devDependencies": {
-    "serve": "^14.2.0"
+  "dependencies": {
+    "node-edge-tts": "^2.10.0"
   }
 }
