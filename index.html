@@ -272,31 +272,16 @@
         }
 
         async function callEdgeTTS(text, voice, rate) {
-            const endpoint = 'https://speech.platform.bing.com/synthesize';
-            const headers = {
-                'Content-Type': 'application/ssml+xml',
-                'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mp3',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            };
+            const API_URL = '/api/tts';
             
-            const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-                <voice name='${voice}'>
-                    <prosody rate='${rate >= 0 ? '+' : ''}${rate}%'>${escapeXml(text)}</prosody>
-                </voice>
-            </speak>`;
-            
-            const response = await fetch(endpoint, {
+            const response = await fetch(API_URL, {
                 method: 'POST',
-                headers: { ...headers, 'Content-Length': ssml.length },
-                body: ssml
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, voice, rate })
             });
             
             if (!response.ok) throw new Error('TTS API hatası: ' + response.status);
             return response.blob();
-        }
-
-        function escapeXml(text) {
-            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
         function splitTextIntoChunks(text, maxLength) {
