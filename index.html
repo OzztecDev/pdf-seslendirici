@@ -392,7 +392,7 @@
             }
         }
 
-        // YouTube Transcript - Using YouTube Data API via Vercel proxy
+        // YouTube Transcript - Multiple fallback methods
         async function getTranscript() {
             const url = document.getElementById('youtubeUrl').value;
             if (!url) {
@@ -401,7 +401,7 @@
             }
             
             showStatus('YouTube transcript alınıyor...', 'info');
-            updateProgress(20, 'Video ID alınıyor...');
+            updateProgress(10, 'Video ID alınıyor...');
             
             try {
                 const videoId = extractVideoId(url);
@@ -409,16 +409,23 @@
                     throw new Error('Geçersiz YouTube URL');
                 }
                 
-                // Try multiple methods
-                let transcript = await tryGetTranscript(videoId);
+                updateProgress(30, 'Farklı yöntemler deneniyor...');
+                
+                // Method 1: Try Piped API
+                let transcript = await tryPipedAPI(videoId);
+                
+                // Method 2: Try Invidious
+                if (!transcript) transcript = await tryInvidiousAPI(videoId);
+                
+                // Method 3: Try Hooktube
+                if (!transcript) transcript = await tryHooktube(videoId);
+                
+                // Method 4: Try withCaptions.io (if available)
+                if (!transcript) transcript = await try_yewtu_be(videoId);
                 
                 if (!transcript) {
-                    // Fallback: Use Invidious API
-                    transcript = await tryInvidiousAPI(videoId);
-                }
-                
-                if (!transcript) {
-                    throw new Error('Bu video için transcript bulunamadı. Video herkese açık olmalı ve otomatik altyazı içermeli.');
+                    showStatus('Transcript bulunamadı.Alternatif: YouTube\'da video aç → three dots → "Show transcript" → metni kopyala', 'error');
+                    return;
                 }
                 
                 extractedText = transcript;
@@ -430,47 +437,83 @@
                 
             } catch (error) {
                 console.error(error);
-                showStatus('Hata: ' + error.message + '. Alternatif olarak metni manuel girebilirsiniz.', 'error');
+                showStatus('Hata: ' + error.message, 'error');
             }
         }
         
-        async function tryGetTranscript(videoId) {
+        async function tryPipedAPI(videoId) {
             try {
-                const response = await fetch(`https://transcript.party/api/videos/${videoId}/transcript`);
+                const response = await fetch(`https://pipedapi.kavin.rocks/captions/${videoId}`);
                 if (!response.ok) return null;
                 const data = await response.json();
-                if (data.transcript && data.transcript.length > 0) {
-                    return data.transcript.map(item => item.text).join(' ');
+                
+                if (data && data.length > 0) {
+                    const caption = data.find(c => c.langCode === 'en' || c.langCode === 'tr') || data[0];
+                    if (caption && caption.url) {
+                        const captionResponse = await fetch(caption.url);
+                        const text = await captionResponse.text();
+                        return parseVTT(text);
+                    }
                 }
-            } catch (e) {}
+            } catch (e) { console.log('Piped failed'); }
             return null;
         }
         
         async function tryInvidiousAPI(videoId) {
             try {
-                const response = await fetch(`https://invidious.projectsegfau.lt/api/v1/videos/${videoId}`);
+                const response = await fetch(`https://invidious.projectsegfau.lt/api/v1/videos/${videoId}?fields=captions`);
                 if (!response.ok) return null;
                 const data = await response.json();
                 
-                if (data.captions && data.captions.length > 0) {
-                    const caption = data.captions.find(c => c.languageCode === 'en' || c.languageCode === 'tr');
+                if (data && data.captions && data.captions.length > 0) {
+                    const caption = data.captions.find(c => c.languageCode === 'en' || c.languageCode === 'tr') || data.captions[0];
                     if (caption && caption.url) {
                         const captionResponse = await fetch(caption.url);
-                        const captionText = await captionResponse.text();
-                        // Parse VTT format
-                        const lines = captionText.split('\n');
-                        let text = '';
-                        for (let i = 0; i < lines.length; i++) {
-                            const line = lines[i].trim();
-                            if (line && !line.includes('-->') && !/^\d+$/.test(line)) {
-                                text += line + ' ';
-                            }
-                        }
-                        return text.trim();
+                        const text = await captionResponse.text();
+                        return parseVTT(text);
                     }
                 }
-            } catch (e) {}
+            } catch (e) { console.log('Invidious failed'); }
             return null;
+        }
+        
+        async function tryHooktube(videoId) {
+            try {
+                const response = await fetch(`https://hooktube.com/api/videos/${videoId}/captions`);
+                if (!response.ok) return null;
+                const data = await response.json();
+                if (data && data.length > 0) {
+                    return data.map(d => d.text).join(' ');
+                }
+            } catch (e) { console.log('Hooktube failed'); }
+            return null;
+        }
+        
+        async function try_yewtu_be(videoId) {
+            try {
+                const response = await fetch(`https://yewtu.be/api/videos/${videoId}/captions`);
+                if (!response.ok) return null;
+                const data = await response.json();
+                if (data && data.length > 0) {
+                    const caption = data[0];
+                    const captionResponse = await fetch(caption.url);
+                    const text = await captionResponse.text();
+                    return parseVTT(text);
+                }
+            } catch (e) { console.log('yewtu.be failed'); }
+            return null;
+        }
+        
+        function parseVTT(vttText) {
+            const lines = vttText.split('\n');
+            let text = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.includes('-->') && !/^\d+$/.test(trimmed) && !trimmed.startsWith('WEBVTT')) {
+                    text += trimmed + ' ';
+                }
+            }
+            return text.replace(/\s+/g, ' ').trim();
         }
 
         function extractVideoId(url) {
