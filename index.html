@@ -213,18 +213,19 @@
             <div id="youtubePreview" style="margin-bottom: 15px; display: none;">
                 <iframe id="youtubeEmbed" width="100%" height="315" frameborder="0" allowfullscreen></iframe>
             </div>
-            <button class="btn btn-primary" onclick="copyFromClipboard()" style="margin-bottom: 15px; width: 100%;">
-                📋 Pano İçeriğini Metin Kutusuna Yapıştır
+            <button class="btn btn-primary" onclick="getTranscript()" style="margin-bottom: 15px; width: 100%;">
+                📥 Transcript Dene
             </button>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                <h4 style="margin-bottom: 10px;">📋 YouTube Transcript Nasıl Alınır:</h4>
+            <button class="btn btn-secondary" onclick="copyFromClipboard()" style="margin-bottom: 15px; width: 100%;">
+                📋 Pano İçeriğini Yapıştır
+            </button>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 10px;">
+                <h4 style="margin-bottom: 10px;">📋 Manuel Alma:</h4>
                 <ol style="font-size: 13px; color: #555; padding-left: 20px; line-height: 1.8;">
                     <li>YouTube'da videoya git</li>
-                    <li>Video oynatılırken <strong>sağ tıkla</strong></li>
-                    <li>Açılan menüden <strong>"Show transcript"</strong> seç</li>
-                    <li>Sol tarafta transcript paneli açılır</li>
-                    <li><strong>Sağ üstteki ⋮</strong> butona tıkla → <strong>"Toggle timestamps"</strong> seç (zamanları kaldır)</li>
-                    <li>Tüm metni <strong>seç → kopyala</strong></li>
+                    <li>Sağ tıkla → <strong>"Show transcript"</strong></li>
+                    <li>Sağ üstteki ⋮ → <strong>"Toggle timestamps"</strong></li>
+                    <li>Tüm metni seç → kopyala</li>
                     <li>Yukarıdaki <strong>"Pano İçeriğini Yapıştır"</strong> butona tıkla</li>
                 </ol>
             </div>
@@ -404,7 +405,7 @@
             }
         }
 
-        // YouTube Transcript - Using youtubetranscript.dev API
+        // YouTube Transcript - Multiple methods
         async function getTranscript() {
             const url = document.getElementById('youtubeUrl').value;
             if (!url) {
@@ -412,7 +413,7 @@
                 return;
             }
             
-            showStatus('YouTube transcript alınıyor...', 'info');
+            showStatus('YouTube transcript deneniyor...', 'info');
             updateProgress(10, 'Video ID alınıyor...');
             
             try {
@@ -421,16 +422,26 @@
                     throw new Error('Geçersiz YouTube URL');
                 }
                 
-                updateProgress(30, 'Transcript alınıyor...');
-                
-                // Try youtubetranscript.dev (most reliable free option)
-                let transcript = await tryYouTubeTranscriptDev(videoId);
-                
-                if (!transcript) transcript = await tryPipedAPI(videoId);
-                if (!transcript) transcript = await tryInvidiousAPI(videoId);
+                updateProgress(30, 'API 1 deneniyor...');
+                let transcript = await tryAPI(videoId, 'https://api.allorigins.win/raw?url=' + encodeURIComponent(`https://youtubetranscript.dev/api/transcript?videoId=${videoId}&lang=tr,en`));
                 
                 if (!transcript) {
-                    showStatus('Transcript bulunamadı. YouTube\'da videoya sağ tıkla → "Show transcript" → tüm metni kopyala ve aşağıdaki kutuya yapıştır', 'error');
+                    updateProgress(50, 'API 2 deneniyor...');
+                    transcript = await tryCORSProxy(videoId);
+                }
+                
+                if (!transcript) {
+                    updateProgress(70, 'API 3 deneniyor...');
+                    transcript = await tryPipedAPI(videoId);
+                }
+                
+                if (!transcript) {
+                    updateProgress(85, 'Son yöntem deneniyor...');
+                    transcript = await tryDirectCaptions(videoId);
+                }
+                
+                if (!transcript) {
+                    showStatus('Otomatik alınamadı. YouTube\'da "Show transcript" → kopyala → butona tıkla', 'error');
                     return;
                 }
                 
@@ -447,21 +458,105 @@
             }
         }
         
-        async function tryYouTubeTranscriptDev(videoId) {
+        async function tryAPI(videoId, url) {
             try {
-                // Use their API endpoint
-                const response = await fetch(`https://youtubetranscript.dev/api/transcript?videoId=${videoId}&lang=tr,en`);
+                const response = await fetch(url);
                 if (!response.ok) return null;
                 const data = await response.json();
-                
                 if (data && data.transcript && data.transcript.length > 0) {
                     return data.transcript.map(t => t.text).join(' ');
                 }
-            } catch (e) { console.log('youtubetranscript.dev failed'); }
+            } catch (e) { console.log('API 1 failed'); }
+            return null;
+        }
+        
+        async function tryCORSProxy(videoId) {
+            try {
+                const urls = [
+                    `https://corsproxy.io/?https://youtubetranscript.dev/api/transcript?videoId=${videoId}&lang=tr,en`,
+                    `https://api.allorigins.win/get?url=${encodeURIComponent(`https://youtubetranscript.dev/api/transcript?videoId=${videoId}&lang=tr,en`)}`
+                ];
+                for (const url of urls) {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (data && data.transcript) {
+                        const transcript = data.transcript?.map(t => t.text).join(' ') || data.contents?.transcript?.map(t => t.text).join(' ');
+                        if (transcript) return transcript;
+                    }
+                }
+            } catch (e) { console.log('CORS proxy failed'); }
             return null;
         }
         
         async function tryPipedAPI(videoId) {
+            try {
+                const apis = [
+                    'https://pipedapi.adminforge.de',
+                    'https://pipedapi.lunar.icu',
+                    'https://api.piped.yt'
+                ];
+                for (const api of apis) {
+                    const response = await fetch(`${api}/captions/${videoId}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.length > 0) {
+                            const caption = data.find(c => c.langCode === 'en' || c.langCode === 'tr') || data[0];
+                            if (caption && caption.url) {
+                                const captionResp = await fetch(caption.url);
+                                const captionText = await captionResp.text();
+                                return parseVTT(captionText);
+                            }
+                        }
+                    }
+                }
+            } catch (e) { console.log('Piped failed'); }
+            return null;
+        }
+        
+        async function tryDirectCaptions(videoId) {
+            try {
+                // Try direct YouTube caption API through proxy
+                const url = `https://video.google.com/timedtext?fmt=json&v=${videoId}&lang=tr`;
+                const response = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+                if (response.ok) {
+                    const text = await response.text();
+                    if (text && text.includes('<text')) {
+                        return parseYouTubeTT(text);
+                    }
+                }
+                // Try English
+                const urlEn = `https://video.google.com/timedtext?fmt=json&v=${videoId}&lang=en`;
+                const responseEn = await fetch(`https://corsproxy.io/?${encodeURIComponent(urlEn)}`);
+                if (responseEn.ok) {
+                    const text = await responseEn.text();
+                    if (text && text.includes('<text')) {
+                        return parseYouTubeTT(text);
+                    }
+                }
+            } catch (e) { console.log('Direct captions failed'); }
+            return null;
+        }
+        
+        function parseYouTubeTT(xmlText) {
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(xmlText, 'text/xml');
+            const texts = xml.querySelectorAll('text');
+            let result = '';
+            texts.forEach(t => result += t.textContent + ' ');
+            return result.replace(/\s+/g, ' ').trim();
+        }
+        
+        function parseVTT(vttText) {
+            const lines = vttText.split('\n');
+            let text = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.includes('-->') && !/^\d+$/.test(trimmed) && !trimmed.startsWith('WEBVTT') && !trimmed.startsWith('NOTE')) {
+                    text += trimmed + ' ';
+                }
+            }
+            return text.replace(/\s+/g, ' ').trim();
+        }
             try {
                 const response = await fetch(`https://pipedapi.kavin.rocks/captions/${videoId}`);
                 if (!response.ok) return null;
@@ -479,19 +574,17 @@
             return null;
         }
         
-        async function tryInvidiousAPI(videoId) {
-            try {
-                const response = await fetch(`https://invidious.projectsegfau.lt/api/v1/videos/${videoId}?fields=captions`);
-                if (!response.ok) return null;
-                const data = await response.json();
-                
-                if (data && data.captions && data.captions.length > 0) {
-                    const caption = data.captions.find(c => c.languageCode === 'en' || c.languageCode === 'tr') || data.captions[0];
-                    if (caption && caption.url) {
-                        const captionResponse = await fetch(caption.url);
-                        const text = await captionResponse.text();
-                        return parseVTT(text);
-                    }
+        function parseVTT(vttText) {
+            const lines = vttText.split('\n');
+            let text = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.includes('-->') && !/^\d+$/.test(trimmed) && !trimmed.startsWith('WEBVTT') && !trimmed.startsWith('NOTE')) {
+                    text += trimmed + ' ';
+                }
+            }
+            return text.replace(/\s+/g, ' ').trim();
+        }
                 }
             } catch (e) { console.log('Invidious failed'); }
             return null;
